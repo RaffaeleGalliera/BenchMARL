@@ -11,7 +11,6 @@ from .gnn import Gnn, _batch_from_dense_to_ptg, _RelVel
 from tensordict import TensorDictBase
 from tensordict.utils import _unravel_key_to_tuple
 
-
 def _batch_from_dense_to_ptg_with_actions(
     x: Tensor,
     edge_index: Optional[Tensor],
@@ -95,7 +94,7 @@ def _batch_from_dense_to_ptg_with_actions(
     return graphs
 
 
-class SelectiveGNN(Gnn):
+class SelectiveGnn(Gnn):
     def __init__(self, num_actions: int = 4, **kwargs):
         super().__init__(**kwargs)
         self.num_actions = num_actions
@@ -228,4 +227,4 @@ class SelectiveGnnConfig(ModelConfig):
 
     @staticmethod
     def associated_class():
-        return SelectiveGNN
+        return SelectiveGnn
