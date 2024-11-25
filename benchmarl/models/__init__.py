@@ -17,6 +17,7 @@ from .gnn import Gnn, GnnConfig
 from .gru import Gru, GruConfig
 from .lstm import Lstm, LstmConfig
 from .mlp import Mlp, MlpConfig
+from .selective_gnn import SelectiveGnnConfig
 
 classes = [
     "Mlp",
@@ -31,6 +32,8 @@ classes = [
     "GruConfig",
     "Lstm",
     "LstmConfig",
+    "SelectiveGnn",
+    "SelectiveGnnConfig",
 ]
 
 model_config_registry = {
@@ -40,4 +43,5 @@ model_config_registry = {
     "deepsets": DeepsetsConfig,
     "gru": GruConfig,
     "lstm": LstmConfig,
+    "selective_gnn": SelectiveGnnConfig,
 }
