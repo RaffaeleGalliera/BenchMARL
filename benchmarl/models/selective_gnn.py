@@ -36,7 +36,7 @@ def _batch_from_dense_to_ptg_with_actions(
 
     # Create initial graphs
     graphs = torch_geometric.data.Batch()
-    graphs.ptr = torch.arange(0, (batch_size + 1) * n_agents, n_agents)
+    graphs.ptr = torch.arange(0, (batch_size + 1) * n_agents, n_agents, device=x.device)
     graphs.batch = batch_indices
     graphs.x = x
     graphs.pos = pos
@@ -45,9 +45,9 @@ def _batch_from_dense_to_ptg_with_actions(
     # Handle edge construction
     if edge_index is not None:
         # Replicate edge indices for each graph in the batch
-        edge_index_offset = torch.arange(batch_size, device=x.device).repeat_interleave(
-            edge_index.shape[1]
-        ) * n_agents
+        edge_index_offset = (
+            torch.arange(batch_size, device=x.device).repeat_interleave(edge_index.shape[1]) * n_agents
+        )
         edge_index = edge_index.repeat(1, batch_size) + edge_index_offset
         graphs.edge_index = edge_index
     else:
@@ -59,37 +59,55 @@ def _batch_from_dense_to_ptg_with_actions(
 
     # Add action-based edges
     if actions is not None:
-        # Flatten actions
-        actions = actions.view(-1)  # Shape: [total_nodes]
+        actions = actions.view(-1)  # Flatten actions
+        group = batch_indices * num_actions + actions  # Global group ID
 
-        # Compute group IDs based on batch and actions
-        group = batch_indices * num_actions + actions  # Shape: [total_nodes]
+        # Get unique groups and inverse indices
+        unique_groups, inverse_indices = group.unique(return_inverse=True)
 
-        # Sort group indices for efficient edge construction
-        _, sorted_indices = torch.sort(group)
-        sorted_group = group[sorted_indices]
+        # Sort nodes by group
+        sorted_indices = torch.argsort(inverse_indices)
+        sorted_inverse_indices = inverse_indices[sorted_indices]
 
-        # Identify boundaries where group IDs change
-        group_boundaries = torch.cat(
-            [torch.tensor([0], device=x.device), (sorted_group[1:] != sorted_group[:-1]).nonzero().flatten() + 1]
-        )
-        group_sizes = group_boundaries[1:] - group_boundaries[:-1]
+        # Compute group sizes and offsets
+        group_sizes = torch.bincount(sorted_inverse_indices)
+        group_offsets = torch.cumsum(torch.cat([torch.tensor([0], device=x.device), group_sizes[:-1]]), dim=0)
 
-        # Precompute edges for nodes within each group
-        edge_indices = []
-        for start, size in zip(group_boundaries[:-1], group_sizes):
-            if size > 1:
-                indices = sorted_indices[start : start + size]
-                # Generate all pairwise combinations of indices
-                idx_i, idx_j = torch.combinations(indices, r=2).unbind(1)
+        # Precompute total number of edges
+        if self_loops:
+            num_edges_per_group = group_sizes * group_sizes
+        else:
+            num_edges_per_group = group_sizes * (group_sizes - 1)
+        total_num_edges = num_edges_per_group.sum().item()
+
+        # Preallocate edge index tensors
+        idx_i = torch.empty(total_num_edges, dtype=torch.long, device=x.device)
+        idx_j = torch.empty(total_num_edges, dtype=torch.long, device=x.device)
+
+        ptr = 0
+        for i in range(len(group_sizes)):
+            start = group_offsets[i].item()
+            end = start + group_sizes[i].item()
+            nodes = sorted_indices[start:end]
+            n = nodes.size(0)
+            if n > 1 or (n == 1 and self_loops):
+                idx_i_g = nodes.repeat_interleave(n)
+                idx_j_g = nodes.repeat(n)
                 if not self_loops:
-                    mask = idx_i != idx_j
-                    idx_i, idx_j = idx_i[mask], idx_j[mask]
-                edge_indices.append(torch.stack([idx_i, idx_j], dim=0))
+                    mask = idx_i_g != idx_j_g
+                    idx_i_g = idx_i_g[mask]
+                    idx_j_g = idx_j_g[mask]
+                num_edges = idx_i_g.size(0)
+                idx_i[ptr:ptr + num_edges] = idx_i_g
+                idx_j[ptr:ptr + num_edges] = idx_j_g
+                ptr += num_edges
 
-        if edge_indices:
-            edge_index_action = torch.cat(edge_indices, dim=1)
-            # Combine with radius-based edges
+        # Truncate idx_i and idx_j in case some groups have n <=1
+        idx_i = idx_i[:ptr]
+        idx_j = idx_j[:ptr]
+
+        if idx_i.numel() > 0:
+            edge_index_action = torch.stack([idx_i, idx_j], dim=0)
             graphs.edge_index = torch.cat([graphs.edge_index, edge_index_action], dim=1)
 
     # Apply graph transforms for edge attributes
@@ -101,7 +119,6 @@ def _batch_from_dense_to_ptg_with_actions(
         graphs = _RelVel()(graphs)
 
     return graphs
-
 
 
 class SelectiveGnn(Gnn):
