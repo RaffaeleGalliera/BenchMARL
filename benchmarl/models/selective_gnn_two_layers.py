@@ -30,7 +30,7 @@ class SelectiveGnnTwoLayers(SelectiveGnn):
                         nn.ReLU(inplace=True),
                         (gnn_class(**gnn_kwargs),'x, edge_index, edge_attr -> x'),
                     ]
-                )
+                ).to(self.device)
                 for _ in range(self.n_agents if not self.share_params else 1)
             ]
         )
