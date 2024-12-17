@@ -20,14 +20,15 @@ class GnnTwoLayers(Gnn):
             raise ValueError("gnn_class must be provided")
         gnn_kwargs = kwargs.get("gnn_kwargs", {})
         gnn_kwargs["in_channels"] = self.output_features
+        input_args = 'x, edge_index, edge_attr' if self.topology == 'from_pos' else 'x, edge_index'
         self.models = nn.ModuleList(
             [
                 Sequential(
-                    'x, edge_index, edge_attr',
+                    input_args,
                     [
-                        (self.gnns[0], 'x, edge_index, edge_attr -> x'),
+                        (self.gnns[0], f'{input_args} -> x'),
                         nn.ReLU(inplace=True),
-                        (gnn_class(**gnn_kwargs),'x, edge_index, edge_attr -> x'),
+                        (gnn_class(**gnn_kwargs), f'{input_args} -> x'),
                     ]
                 ).to(self.device)
                 for _ in range(self.n_agents if not self.share_params else 1)

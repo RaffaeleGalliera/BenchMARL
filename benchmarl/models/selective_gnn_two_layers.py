@@ -8,7 +8,7 @@ from torch import nn, Tensor
 from torch_geometric.nn import Sequential
 
 from . import ModelConfig
-from .selective_gnn import SelectiveGnn, _batch_from_dense_to_ptg
+from .selective_gnn import SelectiveGnn, _batch_from_dense_to_ptg_with_actions
 from tensordict import TensorDictBase
 from tensordict.utils import _unravel_key_to_tuple
 
@@ -37,8 +37,7 @@ class SelectiveGnnTwoLayers(SelectiveGnn):
         )
 
     def _forward(self, tensordict: TensorDictBase) -> TensorDictBase:
-        # Gather in_key
-        input = [
+        input_features = [
             tensordict.get(in_key)
             for in_key in self.in_keys
             if _unravel_key_to_tuple(in_key)[-1]
@@ -47,59 +46,61 @@ class SelectiveGnnTwoLayers(SelectiveGnn):
 
         # Retrieve position
         if self.position_key is not None:
-            if self._full_position_key is None:  # Run once to find full key
+            if self._full_position_key is None:
                 self._full_position_key = self._get_key_terminating_with(
                     list(tensordict.keys(True, True)), self.position_key
                 )
-                pos = tensordict.get(self._full_position_key)
-                if pos.shape[-1] != self.pos_features - 1:
-                    raise ValueError(
-                        f"Position key in tensordict is {pos.shape[-1]}-dimensional, "
-                        f"while model was configured with pos_features={self.pos_features - 1}"
-                    )
-            else:
-                pos = tensordict.get(self._full_position_key)
+            pos = tensordict.get(self._full_position_key)
             if not self.exclude_pos_from_node_features:
-                input.append(pos)
+                input_features.append(pos)
         else:
             pos = None
 
         # Retrieve velocity
         if self.velocity_key is not None:
-            if self._full_velocity_key is None:  # Run once to find full key
+            if self._full_velocity_key is None:
                 self._full_velocity_key = self._get_key_terminating_with(
                     list(tensordict.keys(True, True)), self.velocity_key
                 )
-                vel = tensordict.get(self._full_velocity_key)
-                if vel.shape[-1] != self.vel_features:
-                    raise ValueError(
-                        f"Velocity key in tensordict is {vel.shape[-1]}-dimensional, "
-                        f"while model was configured with vel_features={self.vel_features}"
-                    )
-            else:
-                vel = tensordict.get(self._full_velocity_key)
-            input.append(vel)
+            vel = tensordict.get(self._full_velocity_key)
+            input_features.append(vel)
         else:
             vel = None
 
-        input = torch.cat(input, dim=-1)
+        # Concatenate input features
+        input = torch.cat(input_features, dim=-1)
         batch_size = input.shape[:-2]
 
-        graph = _batch_from_dense_to_ptg(
-            x=input,
-            edge_index=self.edge_index,
-            pos=pos,
-            vel=vel,
+        # Flatten input for action head
+        x = input.view(-1, input.shape[-1]).to(self.device)
+
+        # Compute actions
+        action_logits = self.action_head(x)
+        action_probs = F.gumbel_softmax(action_logits, tau=1, hard=True)
+        actions = action_probs.argmax(dim=-1)  # Shape: [batch_size * n_agents]
+
+        # Build the graph with both radius-based and action-based edges
+        graph = _batch_from_dense_to_ptg_with_actions(
+            x=input.to(self.device),
+            edge_index=self.edge_index.to(self.device) if self.edge_index is not None else None,
+            pos=pos.to(self.device) if pos is not None else None,
+            vel=vel.to(self.device) if vel is not None else None,
+            actions=actions,
+            num_actions=self.num_actions,
             self_loops=self.self_loops,
             edge_radius=self.edge_radius,
         )
+
+        # Proceed with GNN forward pass
         forward_gnn_params = {
             "x": graph.x,
             "edge_index": graph.edge_index,
         }
         if (
-                self.position_key is not None or self.velocity_key is not None
-        ) and self.gnn_supports_edge_attrs:
+                (self.position_key is not None or self.velocity_key is not None)
+                and self.gnn_supports_edge_attrs
+                and graph.edge_attr is not None
+        ):
             forward_gnn_params.update({"edge_attr": graph.edge_attr})
 
         if not self.share_params:
@@ -129,7 +130,6 @@ class SelectiveGnnTwoLayers(SelectiveGnn):
                     ],
                     dim=-2,
                 )
-
         else:
             res = self.models[0](**forward_gnn_params).view(
                 *batch_size, self.n_agents, self.output_features
