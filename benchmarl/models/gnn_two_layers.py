@@ -2,18 +2,17 @@ from dataclasses import MISSING, dataclass
 from typing import Optional, Type
 
 import torch
-import torch.nn.functional as F
 import torch_geometric
-from torch import nn, Tensor
+from torch import nn
 from torch_geometric.nn import Sequential
 
 from . import ModelConfig
-from .selective_gnn import SelectiveGnn, _batch_from_dense_to_ptg
+from .gnn import Gnn, _batch_from_dense_to_ptg
 from tensordict import TensorDictBase
 from tensordict.utils import _unravel_key_to_tuple
 
 
-class SelectiveGnnTwoLayers(SelectiveGnn):
+class GnnTwoLayers(Gnn):
     def __init__(self, num_actions: int = 4, **kwargs):
         super().__init__(num_actions, **kwargs)
         gnn_class = kwargs.get("gnn_class", MISSING)
@@ -21,15 +20,14 @@ class SelectiveGnnTwoLayers(SelectiveGnn):
             raise ValueError("gnn_class must be provided")
         gnn_kwargs = kwargs.get("gnn_kwargs", {})
         gnn_kwargs["in_channels"] = self.output_features
-        input_args = 'x, edge_index, edge_attr' if self.topology == 'from_pos' else 'x, edge_index'
         self.models = nn.ModuleList(
             [
                 Sequential(
-                    input_args,
+                    'x, edge_index, edge_attr',
                     [
-                        (self.gnns[0], f'{input_args} -> x'),
+                        (self.gnns[0], 'x, edge_index, edge_attr -> x'),
                         nn.ReLU(inplace=True),
-                        (gnn_class(**gnn_kwargs), f'{input_args} -> x'),
+                        (gnn_class(**gnn_kwargs),'x, edge_index, edge_attr -> x'),
                     ]
                 ).to(self.device)
                 for _ in range(self.n_agents if not self.share_params else 1)
@@ -142,7 +140,7 @@ class SelectiveGnnTwoLayers(SelectiveGnn):
 
 
 @dataclass
-class SelectiveGnnTwoLayersConfig(ModelConfig):
+class GnnTwoLayersConfig(ModelConfig):
     """Dataclass config for a SelectiveGNN."""
 
     topology: str = MISSING
@@ -158,8 +156,6 @@ class SelectiveGnnTwoLayersConfig(ModelConfig):
     exclude_pos_from_node_features: Optional[bool] = None
     edge_radius: Optional[float] = None
 
-    num_actions: int = 4  # Number of discrete actions for each node
-
     @staticmethod
     def associated_class():
-        return SelectiveGnnTwoLayers
+        return GnnTwoLayers

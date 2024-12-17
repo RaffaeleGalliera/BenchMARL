@@ -13,6 +13,7 @@ from .lstm import Lstm, LstmConfig
 from .mlp import Mlp, MlpConfig
 from .selective_gnn import SelectiveGnnConfig
 from .selective_gnn_two_layers import SelectiveGnnTwoLayersConfig
+from .gnn_two_layers import GnnTwoLayersConfig
 
 classes = [
     "Mlp",
@@ -29,7 +30,10 @@ classes = [
     "LstmConfig",
     "SelectiveGnn",
     "SelectiveGnnConfig",
+    "SelectiveGnnTwoLayers",
     "SelectiveGnnTwoLayersConfig",
+    "GnnTwoLayers",
+    "GnnTwoLayersConfig"
 ]
 
 model_config_registry = {
@@ -41,4 +45,5 @@ model_config_registry = {
     "lstm": LstmConfig,
     "selective_gnn": SelectiveGnnConfig,
     "selective_gnn_two_layers": SelectiveGnnTwoLayersConfig,
+    "gnn_two_layers": GnnTwoLayersConfig
 }
