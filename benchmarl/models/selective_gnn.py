@@ -1,15 +1,17 @@
 from dataclasses import MISSING, dataclass
 from typing import Optional, Type
-
+import inspect
+import warnings
 import torch
 import torch.nn.functional as F
 import torch_geometric
 from torch import nn, Tensor
 
 from . import ModelConfig
-from .gnn import Gnn, _batch_from_dense_to_ptg, _RelVel
+from .gnn import Gnn, _RelVel, _get_edge_index
 from tensordict import TensorDictBase
 from tensordict.utils import _unravel_key_to_tuple
+
 
 def _batch_from_dense_to_ptg_with_actions(
     x: Tensor,
@@ -41,6 +43,13 @@ def _batch_from_dense_to_ptg_with_actions(
     graphs.x = x
     graphs.pos = pos
     graphs.vel = vel
+
+    # add chosen action to node features
+    if actions is not None:
+        # Shape of 'actions' is [batch_size * n_agents].
+        # Convert it to one-hot encoding and concatenate.
+        actions_oh = F.one_hot(actions, num_classes=num_actions).float()
+        graphs.x = torch.cat([graphs.x, actions_oh], dim=-1)
 
     # Handle edge construction
     if edge_index is not None:
@@ -122,11 +131,92 @@ def _batch_from_dense_to_ptg_with_actions(
 
 
 class SelectiveGnn(Gnn):
-    def __init__(self, num_actions: int = 4, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(
+        self,
+        topology: str,
+        self_loops: bool,
+        gnn_class: Type[torch_geometric.nn.MessagePassing],
+        gnn_kwargs: Optional[dict],
+        position_key: Optional[str],
+        exclude_pos_from_node_features: Optional[bool],
+        velocity_key: Optional[str],
+        edge_radius: Optional[float],
+        pos_features: Optional[int],
+        vel_features: Optional[int],
+        num_actions: int = 4,
+        **kwargs,
+    ):
+        self.topology = topology
+        self.self_loops = self_loops
+        self.position_key = position_key
+        self.velocity_key = velocity_key
+        self.exclude_pos_from_node_features = exclude_pos_from_node_features
+        self.edge_radius = edge_radius
+        self.pos_features = pos_features
+        self.vel_features = vel_features
+
+        super(Gnn, self).__init__(**kwargs)
+
+        if self.pos_features > 0:
+            self.pos_features += 1  # We will add also 1-dimensional distance
+        self.edge_features = self.pos_features + self.vel_features
+        self.input_features = sum(
+            [
+                spec.shape[-1]
+                for key, spec in self.input_spec.items(True, True)
+                if _unravel_key_to_tuple(key)[-1] not in (position_key, velocity_key)
+            ]
+        )  # Input keys
+        if self.position_key is not None and not self.exclude_pos_from_node_features:
+            self.input_features += self.pos_features - 1
+        if self.velocity_key is not None:
+            self.input_features += self.vel_features
+
+        # Add group actions to input features
+        self.action_head_input_features = self.input_features
+        self.input_features += num_actions
+
+        self.output_features = self.output_leaf_spec.shape[-1]
+
+        if gnn_kwargs is None:
+            gnn_kwargs = {}
+        gnn_kwargs.update(
+            {"in_channels": self.input_features, "out_channels": self.output_features}
+        )
+        self.gnn_supports_edge_attrs = (
+            "edge_dim" in inspect.getfullargspec(gnn_class).args
+        )
+        if (
+            self.position_key is not None or self.velocity_key is not None
+        ) and not self.gnn_supports_edge_attrs:
+            warnings.warn(
+                "Position key or velocity key provided but GNN class does not support edge attributes. "
+                "These keys will not be used for computing edge features."
+            )
+        if (
+            position_key is not None or velocity_key is not None
+        ) and self.gnn_supports_edge_attrs:
+            gnn_kwargs.update({"edge_dim": self.edge_features})
+
+        self.gnns = nn.ModuleList(
+            [
+                gnn_class(**gnn_kwargs).to(self.device)
+                for _ in range(self.n_agents if not self.share_params else 1)
+            ]
+        )
+        self.edge_index = _get_edge_index(
+            topology=self.topology,
+            self_loops=self.self_loops,
+            device=self.device,
+            n_agents=self.n_agents,
+        )
+        self._full_position_key = None
+        self._full_velocity_key = None
+
+        # Add group selection action head
         self.num_actions = num_actions
-        # Action head (for groups)
-        self.action_head = nn.Linear(self.input_features, self.num_actions).to(self.device)
+        self.action_head = nn.Linear(self.action_head_input_features, self.num_actions).to(self.device)
+
 
     def _forward(self, tensordict: TensorDictBase) -> TensorDictBase:
         input_features = [

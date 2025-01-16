@@ -14,8 +14,8 @@ from tensordict.utils import _unravel_key_to_tuple
 
 
 class SelectiveGnnTwoLayers(SelectiveGnn):
-    def __init__(self, num_actions: int = 4, **kwargs):
-        super().__init__(num_actions, **kwargs)
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
         gnn_class = kwargs.get("gnn_class", MISSING)
         if gnn_class is MISSING:
             raise ValueError("gnn_class must be provided")
