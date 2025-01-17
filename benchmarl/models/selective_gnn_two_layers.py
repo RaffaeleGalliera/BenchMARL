@@ -89,6 +89,7 @@ class SelectiveGnnTwoLayers(SelectiveGnn):
             num_actions=self.num_actions,
             self_loops=self.self_loops,
             edge_radius=self.edge_radius,
+            add_group_actions_to_node_features=self.add_group_actions_to_node_features,
         )
 
         # Proceed with GNN forward pass
@@ -159,6 +160,7 @@ class SelectiveGnnTwoLayersConfig(ModelConfig):
     edge_radius: Optional[float] = None
 
     num_actions: int = 4  # Number of discrete actions for each node
+    add_group_actions_to_node_features: bool = False # Add group actions to node features
 
     @staticmethod
     def associated_class():

@@ -22,6 +22,7 @@ def _batch_from_dense_to_ptg_with_actions(
     actions: Optional[Tensor] = None,
     num_actions: int = 4,
     edge_radius: Optional[float] = None,
+    add_group_actions_to_node_features: bool = False
 ) -> torch_geometric.data.Batch:
     batch_size, n_agents, input_dim = x.shape
     total_nodes = batch_size * n_agents
@@ -45,7 +46,7 @@ def _batch_from_dense_to_ptg_with_actions(
     graphs.vel = vel
 
     # add chosen action to node features
-    if actions is not None:
+    if actions is not None and add_group_actions_to_node_features:
         # Shape of 'actions' is [batch_size * n_agents].
         # Convert it to one-hot encoding and concatenate.
         actions_oh = F.one_hot(actions, num_classes=num_actions).float()
@@ -144,6 +145,7 @@ class SelectiveGnn(Gnn):
         pos_features: Optional[int],
         vel_features: Optional[int],
         num_actions: int = 4,
+        add_group_actions_to_node_features: bool = False,
         **kwargs,
     ):
         self.topology = topology
@@ -154,6 +156,7 @@ class SelectiveGnn(Gnn):
         self.edge_radius = edge_radius
         self.pos_features = pos_features
         self.vel_features = vel_features
+        self.add_group_actions_to_node_features = add_group_actions_to_node_features
 
         super(Gnn, self).__init__(**kwargs)
 
@@ -174,7 +177,8 @@ class SelectiveGnn(Gnn):
 
         # Add group actions to input features
         self.action_head_input_features = self.input_features
-        self.input_features += num_actions
+        if self.add_group_actions_to_node_features:
+            self.input_features += num_actions
 
         self.output_features = self.output_leaf_spec.shape[-1]
 
@@ -271,6 +275,7 @@ class SelectiveGnn(Gnn):
             num_actions=self.num_actions,
             self_loops=self.self_loops,
             edge_radius=self.edge_radius,
+            add_group_actions_to_node_features=self.add_group_actions_to_node_features
         )
 
         # Proceed with GNN forward pass
@@ -341,6 +346,7 @@ class SelectiveGnnConfig(ModelConfig):
     edge_radius: Optional[float] = None
 
     num_actions: int = 4  # Number of discrete actions for each node
+    add_group_actions_to_node_features: bool = False # Add group actions to node features
 
     @staticmethod
     def associated_class():
