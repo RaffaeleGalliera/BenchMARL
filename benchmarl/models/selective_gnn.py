@@ -6,6 +6,7 @@ import torch
 import torch.nn.functional as F
 import torch_geometric
 from torch import nn, Tensor
+from math import prod
 
 from . import ModelConfig
 from .gnn import Gnn, _RelVel, _get_edge_index
@@ -24,23 +25,20 @@ def _batch_from_dense_to_ptg_with_actions(
     edge_radius: Optional[float] = None,
     add_group_actions_to_node_features: bool = False
 ) -> torch_geometric.data.Batch:
-    batch_size, n_agents, input_dim = x.shape
-    total_nodes = batch_size * n_agents
-
-    # Flatten node features and optional inputs
-    x = x.view(total_nodes, input_dim)
+    batch_size = prod(x.shape[:-2])
+    n_agents = x.shape[-2]
+    x = x.view(-1, x.shape[-1])
     if pos is not None:
-        pos = pos.view(total_nodes, -1)
+        pos = pos.view(-1, pos.shape[-1])
     if vel is not None:
-        vel = vel.view(total_nodes, -1)
+        vel = vel.view(-1, vel.shape[-1])
 
-    # Batch indexing for nodes
-    batch_indices = torch.arange(batch_size, device=x.device).repeat_interleave(n_agents)
+    b = torch.arange(batch_size, device=x.device)
 
     # Create initial graphs
     graphs = torch_geometric.data.Batch()
     graphs.ptr = torch.arange(0, (batch_size + 1) * n_agents, n_agents, device=x.device)
-    graphs.batch = batch_indices
+    graphs.batch = torch.repeat_interleave(b, n_agents)
     graphs.x = x
     graphs.pos = pos
     graphs.vel = vel
@@ -54,12 +52,15 @@ def _batch_from_dense_to_ptg_with_actions(
 
     # Handle edge construction
     if edge_index is not None:
-        # Replicate edge indices for each graph in the batch
-        edge_index_offset = (
-            torch.arange(batch_size, device=x.device).repeat_interleave(edge_index.shape[1]) * n_agents
-        )
-        edge_index = edge_index.repeat(1, batch_size) + edge_index_offset
-        graphs.edge_index = edge_index
+        n_edges = edge_index.shape[1]
+        # Tensor of shape [batch_size * n_edges]
+        # in which edges corresponding to the same graph have the same index.
+        batch = torch.repeat_interleave(b, n_edges)
+        # Edge index for the batched graphs of shape [2, n_edges * batch_size]
+        # we sum to each batch an offset of batch_num * n_agents to make sure that
+        # the adjacency matrices remain independent
+        batch_edge_index = edge_index.repeat(1, batch_size) + batch * n_agents
+        graphs.edge_index = batch_edge_index
     else:
         if pos is None:
             raise RuntimeError("from_pos topology needs positions as input")
@@ -70,7 +71,7 @@ def _batch_from_dense_to_ptg_with_actions(
     # Add action-based edges
     if actions is not None:
         actions = actions.view(-1)  # Flatten actions
-        group = batch_indices * num_actions + actions  # Global group ID
+        group = torch.repeat_interleave(b, n_agents) * num_actions + actions  # Global group ID
 
         # Get unique groups and inverse indices
         unique_groups, inverse_indices = group.unique(return_inverse=True)
