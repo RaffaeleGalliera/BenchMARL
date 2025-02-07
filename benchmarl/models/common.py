@@ -135,26 +135,29 @@ class Model(TensorDictModuleBase, ABC):
         return self.input_spec[self.in_key]
 
     def _perform_checks(self):
-        if not self.input_has_agent_dim and not self.centralised:
-            raise ValueError(
-                "If input does not have an agent dimension the model should be marked as centralised"
-            )
-
-        if len(self.out_keys) > 1:
-            raise ValueError("Currently models support just one output key")
-
-        if self.agent_group in self.input_spec.keys() and self.input_spec[
-            self.agent_group
-        ].shape != (self.n_agents,):
-            raise ValueError(
-                "If the agent group is in the input specs, its shape should be the number of agents"
-            )
-        if self.agent_group in self.output_spec.keys() and self.output_spec[
-            self.agent_group
-        ].shape != (self.n_agents,):
-            raise ValueError(
-                "If the agent group is in the output specs, its shape should be the number of agents"
-            )
+        # if not self.input_has_agent_dim and not self.centralised:
+        #     raise ValueError(
+        #         "If input does not have an agent dimension the model should be marked as centralised"
+        #     )
+        #
+        # if len(self.out_keys) > 1:
+        #     pass
+        #     # TODO: check back if we can support multiple output keys more nicely
+        #     # raise ValueError("Currently models support just one output key")
+        #
+        # if self.agent_group in self.input_spec.keys() and self.input_spec[
+        #     self.agent_group
+        # ].shape != (self.n_agents,):
+        #     raise ValueError(
+        #         "If the agent group is in the input specs, its shape should be the number of agents"
+        #     )
+        # if self.agent_group in self.output_spec.keys() and self.output_spec[
+        #     self.agent_group
+        # ].shape != (self.n_agents,):
+        #     raise ValueError(
+        #         "If the agent group is in the output specs, its shape should be the number of agents"
+        #     )
+        pass
 
     def forward(self, tensordict: TensorDictBase) -> TensorDictBase:
         # _check_spec(tensordict, self.input_spec)

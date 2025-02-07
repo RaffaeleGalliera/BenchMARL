@@ -75,7 +75,7 @@ class SelectiveGnnTwoLayers(SelectiveGnn):
         x = input.view(-1, input.shape[-1]).to(self.device)
 
         # Compute actions
-        action_logits = self.action_head(x)
+        action_logits = self.group_action_head(x)
         action_probs = F.gumbel_softmax(action_logits, tau=1, hard=True)
         actions = action_probs.argmax(dim=-1)  # Shape: [batch_size * n_agents]
 

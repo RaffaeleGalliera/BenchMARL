@@ -132,7 +132,7 @@ def _batch_from_dense_to_ptg_with_actions(
     return graphs
 
 
-class SelectiveGnn(Gnn):
+class GumbelSelectiveGnn(Gnn):
     def __init__(
         self,
         topology: str,
@@ -220,137 +220,130 @@ class SelectiveGnn(Gnn):
 
         # Add group selection action head
         self.num_actions = num_actions
-        self.group_action_head = nn.Linear(self.action_head_input_features, self.num_actions).to(self.device)
-
+        self.action_head = nn.Linear(self.action_head_input_features, self.num_actions).to(self.device)
         group = kwargs.get("agent_group")
-        self.intermediate_key = (group, "group_action_value") if isinstance(group, str) else group + ("group_action_value",)
         self.group_action_key = (group, "group_action") if isinstance(group, str) else group + ("group_action",)
+        self.group_action_replay_buffer_key = (group, "group_action_replay") if isinstance(group, str) else group + ("group_action_replay",)
 
-    def _perform_checks(self):
-        pass
 
     def _forward(self, tensordict: TensorDictBase) -> TensorDictBase:
-        input_features = [
-            tensordict.get(in_key)
-            for in_key in self.in_keys
-            if _unravel_key_to_tuple(in_key)[-1]
-            not in (self.position_key, self.velocity_key)
-        ]
+            input_features = [
+                tensordict.get(in_key)
+                for in_key in self.in_keys
+                if _unravel_key_to_tuple(in_key)[-1]
+                not in (self.position_key, self.velocity_key)
+            ]
 
-        # Retrieve position
-        if self.position_key is not None:
-            if self._full_position_key is None:
-                self._full_position_key = self._get_key_terminating_with(
-                    list(tensordict.keys(True, True)), self.position_key
-                )
-            pos = tensordict.get(self._full_position_key)
-            if not self.exclude_pos_from_node_features:
-                input_features.append(pos)
-        else:
-            pos = None
-
-        # Retrieve velocity
-        if self.velocity_key is not None:
-            if self._full_velocity_key is None:
-                self._full_velocity_key = self._get_key_terminating_with(
-                    list(tensordict.keys(True, True)), self.velocity_key
-                )
-            vel = tensordict.get(self._full_velocity_key)
-            input_features.append(vel)
-        else:
-            vel = None
-
-        # Concatenate input features
-        input = torch.cat(input_features, dim=-1)
-        batch_size = input.shape[:-2]
-
-        # Flatten input for action head
-        x = input.view(-1, input.shape[-1]).to(self.device)
-
-        # Calculate Group Actions Logits
-        group_action_logits = self.group_action_head(x)
-        group_action_logits = group_action_logits.view(*batch_size, self.n_agents, self.num_actions)
-        tensordict.set(self.intermediate_key, group_action_logits)
-
-        # Build adjacency based on chosen group IF we are in "inference/rollout" mode.
-        #    However, for the loss pass, we'll use the group stored in the tensordict's replay buffer.
-        #    So we do the following logic:
-        if self.group_action_key in tensordict.keys(True, True):
-            # We have a chosen group_action in the tensordict (e.g. from replay or from a prior sample).
-            # shape = [*batch, n_agents]
-            chosen_group = tensordict.get(self.group_action_key)
-        else:
-            # We do not have a chosen group in the tensordict => default to argmax
-            # (In practice, a QValueModule or EGreedy will set it. But we do a fallback.)
-            chosen_group = group_action_logits.argmax(dim=-1)
-
-        chosen_group = chosen_group.view(-1)
-
-        # Build the graph with both radius-based and action-based edges
-        graph = _batch_from_dense_to_ptg_with_actions(
-            x=input.to(self.device),
-            edge_index=self.edge_index.to(self.device) if self.edge_index is not None else None,
-            pos=pos.to(self.device) if pos is not None else None,
-            vel=vel.to(self.device) if vel is not None else None,
-            actions=chosen_group,
-            num_actions=self.num_actions,
-            self_loops=self.self_loops,
-            edge_radius=self.edge_radius,
-            add_group_actions_to_node_features=self.add_group_actions_to_node_features
-        )
-
-        # Proceed with GNN forward pass
-        forward_gnn_params = {
-            "x": graph.x,
-            "edge_index": graph.edge_index,
-        }
-        if (
-            (self.position_key is not None or self.velocity_key is not None)
-            and self.gnn_supports_edge_attrs
-            and graph.edge_attr is not None
-        ):
-            forward_gnn_params.update({"edge_attr": graph.edge_attr})
-
-        if not self.share_params:
-            if not self.centralised:
-                res = torch.stack(
-                    [
-                        gnn(**forward_gnn_params).view(
-                            *batch_size,
-                            self.n_agents,
-                            self.output_features,
-                        )[..., i, :]
-                        for i, gnn in enumerate(self.gnns)
-                    ],
-                    dim=-2,
-                )
+            # Retrieve position
+            if self.position_key is not None:
+                if self._full_position_key is None:
+                    self._full_position_key = self._get_key_terminating_with(
+                        list(tensordict.keys(True, True)), self.position_key
+                    )
+                pos = tensordict.get(self._full_position_key)
+                if not self.exclude_pos_from_node_features:
+                    input_features.append(pos)
             else:
-                res = torch.stack(
-                    [
-                        gnn(**forward_gnn_params)
-                        .view(
-                            *batch_size,
-                            self.n_agents,
-                            self.output_features,
-                        )
-                        .mean(dim=-2)  # Mean pooling
-                        for i, gnn in enumerate(self.gnns)
-                    ],
-                    dim=-2,
-                )
-        else:
-            res = self.gnns[0](**forward_gnn_params).view(
-                *batch_size, self.n_agents, self.output_features
-            )
-            if self.centralised:
-                res = res.mean(dim=-2)  # Mean pooling
+                pos = None
 
-        tensordict.set(self.out_key, res)
-        return tensordict
+            # Retrieve velocity
+            if self.velocity_key is not None:
+                if self._full_velocity_key is None:
+                    self._full_velocity_key = self._get_key_terminating_with(
+                        list(tensordict.keys(True, True)), self.velocity_key
+                    )
+                vel = tensordict.get(self._full_velocity_key)
+                input_features.append(vel)
+            else:
+                vel = None
+
+            # Concatenate input features
+            input = torch.cat(input_features, dim=-1)
+            batch_size = input.shape[:-2]
+
+            # Flatten input for action head
+            x = input.view(-1, input.shape[-1]).to(self.device)
+
+            # Compute actions
+            if self.group_action_replay_buffer_key in tensordict.keys(True, True):
+                actions = tensordict.get(self.group_action_key)
+                actions = actions.view(-1)
+            else:
+                action_logits = self.action_head(x)
+                if self.is_critic:
+                    actions = action_logits.argmax(dim=-1)
+                else:
+                    action_probs = F.gumbel_softmax(action_logits, tau=1, hard=True)
+                    actions = action_probs.argmax(dim=-1)  # Shape: [batch_size * n_agents]
+                    buffer_actions = actions.view(*batch_size, self.n_agents)
+                    tensordict.set(self.group_action_key, buffer_actions)
+
+
+            # Build the graph with both radius-based and action-based edges
+            graph = _batch_from_dense_to_ptg_with_actions(
+                x=input.to(self.device),
+                edge_index=self.edge_index.to(self.device) if self.edge_index is not None else None,
+                pos=pos.to(self.device) if pos is not None else None,
+                vel=vel.to(self.device) if vel is not None else None,
+                actions=actions,
+                num_actions=self.num_actions,
+                self_loops=self.self_loops,
+                edge_radius=self.edge_radius,
+                add_group_actions_to_node_features=self.add_group_actions_to_node_features
+            )
+
+            # Proceed with GNN forward pass
+            forward_gnn_params = {
+                "x": graph.x,
+                "edge_index": graph.edge_index,
+            }
+            if (
+                (self.position_key is not None or self.velocity_key is not None)
+                and self.gnn_supports_edge_attrs
+                and graph.edge_attr is not None
+            ):
+                forward_gnn_params.update({"edge_attr": graph.edge_attr})
+
+            if not self.share_params:
+                if not self.centralised:
+                    res = torch.stack(
+                        [
+                            gnn(**forward_gnn_params).view(
+                                *batch_size,
+                                self.n_agents,
+                                self.output_features,
+                            )[..., i, :]
+                            for i, gnn in enumerate(self.gnns)
+                        ],
+                        dim=-2,
+                    )
+                else:
+                    res = torch.stack(
+                        [
+                            gnn(**forward_gnn_params)
+                            .view(
+                                *batch_size,
+                                self.n_agents,
+                                self.output_features,
+                            )
+                            .mean(dim=-2)  # Mean pooling
+                            for i, gnn in enumerate(self.gnns)
+                        ],
+                        dim=-2,
+                    )
+            else:
+                res = self.gnns[0](**forward_gnn_params).view(
+                    *batch_size, self.n_agents, self.output_features
+                )
+                if self.centralised:
+                    res = res.mean(dim=-2)  # Mean pooling
+
+            tensordict.set(self.out_key, res)
+            return tensordict
 
 
 @dataclass
-class SelectiveGnnConfig(ModelConfig):
+class GumbelSelectiveGnnConfig(ModelConfig):
     """Dataclass config for a SelectiveGNN."""
 
     topology: str = MISSING
@@ -371,4 +364,4 @@ class SelectiveGnnConfig(ModelConfig):
 
     @staticmethod
     def associated_class():
-        return SelectiveGnn
+        return GumbelSelectiveGnn

@@ -20,6 +20,7 @@ from .mlp import Mlp, MlpConfig
 from .selective_gnn import SelectiveGnnConfig
 from .selective_gnn_two_layers import SelectiveGnnTwoLayersConfig
 from .gnn_two_layers import GnnTwoLayersConfig
+from .gumbel_selective_gnn import GumbelSelectiveGnnConfig, GumbelSelectiveGnn
 
 classes = [
     "Mlp",
@@ -39,7 +40,9 @@ classes = [
     "SelectiveGnnTwoLayers",
     "SelectiveGnnTwoLayersConfig",
     "GnnTwoLayers",
-    "GnnTwoLayersConfig"
+    "GnnTwoLayersConfig",
+    "GumbelSelectiveGnn",
+    "GumbelSelectiveGnnConfig",
 ]
 
 model_config_registry = {
@@ -51,5 +54,6 @@ model_config_registry = {
     "lstm": LstmConfig,
     "selective_gnn": SelectiveGnnConfig,
     "selective_gnn_two_layers": SelectiveGnnTwoLayersConfig,
-    "gnn_two_layers": GnnTwoLayersConfig
+    "gnn_two_layers": GnnTwoLayersConfig,
+    "gumbel_selective_gnn": GumbelSelectiveGnnConfig
 }

@@ -1,4 +1,4 @@
-name: selective_gnn
+name: gumbel_selective_gnn
 
 topology: full
 self_loops: False

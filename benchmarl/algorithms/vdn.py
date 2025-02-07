@@ -146,6 +146,12 @@ class Vdn(Algorithm):
     def process_batch(self, group: str, batch: TensorDictBase) -> TensorDictBase:
         keys = list(batch.keys(True, True))
 
+        if (group, "group_action") in keys:
+            batch.set(
+                (group, "group_action_replay"),
+                batch.get((group, "group_action"))
+            )
+
         done_key = ("next", "done")
         terminated_key = ("next", "terminated")
         reward_key = ("next", "reward")
