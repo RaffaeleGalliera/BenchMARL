@@ -221,9 +221,9 @@ class GumbelSelectiveGnn(Gnn):
         # Add group selection action head
         self.num_actions = num_actions
         self.action_head = nn.Linear(self.action_head_input_features, self.num_actions).to(self.device)
-        group = kwargs.get("agent_group")
-        self.group_action_key = (group, "group_action") if isinstance(group, str) else group + ("group_action",)
-        self.group_action_replay_buffer_key = (group, "group_action_replay") if isinstance(group, str) else group + ("group_action_replay",)
+        self.group_key = kwargs.get("agent_group")
+        self.group_action_key = (self.group_key, "group_action") if isinstance(self.group_key, str) else self.group_key + ("group_action",)
+        self.group_action_replay_buffer_key = (self.group_key, "group_action_replay") if isinstance(self.group_key, str) else self.group_key + ("group_action_replay",)
 
 
     def _forward(self, tensordict: TensorDictBase) -> TensorDictBase:

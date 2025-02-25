@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import copy
 import importlib
+import logging
 
 import os
 import shutil
@@ -905,14 +906,26 @@ class Experiment(CallbackNotifier):
             n_iters_performed=self.n_iters_performed,
             mean_return=self.mean_return,
         )
-        state_dict = OrderedDict(
-            state=state,
-            **{f"loss_{k}": item.state_dict() for k, item in self.losses.items()},
-            **{
-                f"buffer_{k}": item.state_dict() if len(item) else None
-                for k, item in self.replay_buffers.items()
-            },
-        )
+        try:
+            state_dict = OrderedDict(
+                state=state,
+                **{f"loss_{k}": item.state_dict() for k, item in self.losses.items()},
+                **{
+                    f"buffer_{k}": item.state_dict() if len(item) else None
+                    for k, item in self.replay_buffers.items()
+                },
+            )
+        except torch.OutOfMemoryError:
+            logging.warning("Out of memory error while saving experiment state. Trying to save without replay buffers.")
+            state_dict = OrderedDict(
+                state=state,
+                **{f"loss_{k}": item.state_dict() for k, item in self.losses.items()},
+                **{
+                    f"buffer_{k}": None
+                    for k, item in self.replay_buffers.items()
+                },
+            )
+
         if not self.config.collect_with_grad:
             state_dict.update({"collector": self.collector.state_dict()})
         return state_dict
