@@ -6,3 +6,4 @@
 
 from .callback import Callback
 from .experiment import Experiment, ExperimentConfig
+from .evaluation import MultiAlgorithmEvaluationConfig, MultiAlgorithmEvaluation

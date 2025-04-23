@@ -381,17 +381,17 @@ class Experiment(CallbackNotifier):
         self._on_setup()
 
     def _perform_checks(self):
-        for config in (self.model_config, self.critic_model_config):
-            if isinstance(config, SequenceModelConfig):
-                for layer_config in config.model_configs[1:]:
-                    if isinstance(layer_config, GnnConfig) and (
-                        layer_config.position_key is not None
-                        or layer_config.velocity_key is not None
-                    ):
-                        raise ValueError(
-                            "GNNs reading position or velocity keys are currently only usable in first"
-                            " layer of sequence models"
-                        )
+        # for config in (self.model_config, self.critic_model_config):
+        #     if isinstance(config, SequenceModelConfig):
+        #         for layer_config in config.model_configs[1:]:
+        #             if isinstance(layer_config, GnnConfig) and (
+        #                 layer_config.position_key is not None
+        #                 or layer_config.velocity_key is not None
+        #             ):
+        #                 raise ValueError(
+        #                     "GNNs reading position or velocity keys are currently only usable in first"
+        #                     " layer of sequence models"
+        #                 )
 
         if self.algorithm_config in (MappoConfig, IppoConfig):
             critic_model_config = self.critic_model_config

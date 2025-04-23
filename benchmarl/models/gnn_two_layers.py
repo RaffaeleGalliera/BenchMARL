@@ -14,8 +14,7 @@ from tensordict.utils import _unravel_key_to_tuple
 
 class GnnTwoLayers(Gnn):
     def __init__(
-            self,
-             _get_pos_from_features: bool = False,  ### NEW
+            self,  ### NEW
              **kwargs
     ):
         """
@@ -26,8 +25,6 @@ class GnnTwoLayers(Gnn):
         :param kwargs: Additional arguments (like gnn_class, gnn_kwargs, etc.)
         """
         super().__init__(**kwargs)
-        self._get_pos_from_features = _get_pos_from_features  ### NEW
-
         gnn_class = kwargs.get("gnn_class", MISSING)
         if gnn_class is MISSING:
             raise ValueError("gnn_class must be provided")
@@ -209,7 +206,7 @@ class GnnTwoLayersConfig(ModelConfig):
     exclude_pos_from_node_features: Optional[bool] = None
     edge_radius: Optional[float] = None
 
-    _get_pos_from_features: bool = False  ### NEW
+    _get_pos_from_features: Optional[bool] = False  ### NEW
 
     @staticmethod
     def associated_class():

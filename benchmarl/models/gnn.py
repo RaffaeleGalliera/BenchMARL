@@ -132,6 +132,7 @@ class Gnn(Model):
         edge_radius: Optional[float],
         pos_features: Optional[int],
         vel_features: Optional[int],
+        _get_pos_from_features: Optional[bool],
         **kwargs,
     ):
         self.topology = topology
@@ -142,6 +143,7 @@ class Gnn(Model):
         self.edge_radius = edge_radius
         self.pos_features = pos_features
         self.vel_features = vel_features
+        self._get_pos_from_features = _get_pos_from_features
 
         super().__init__(**kwargs)
 
@@ -196,6 +198,8 @@ class Gnn(Model):
         )
         self._full_position_key = None
         self._full_velocity_key = None
+        self.group_key = kwargs.get("agent_group")
+
 
     def _perform_checks(self):
         super()._perform_checks()
@@ -275,45 +279,59 @@ class Gnn(Model):
             not in (self.position_key, self.velocity_key)
         ]
 
-        # Retrieve position
-        if self.position_key is not None:
-            if self._full_position_key is None:  # Run once to find full key
-                self._full_position_key = self._get_key_terminating_with(
-                    list(tensordict.keys(True, True)), self.position_key
-                )
-                pos = tensordict.get(self._full_position_key)
-                if pos.shape[-1] != self.pos_features - 1:
-                    raise ValueError(
-                        f"Position key in tensordict is {pos.shape[-1]}-dimensional, "
-                        f"while model was configured with pos_features={self.pos_features-1}"
+        # Default pos, vel to None
+        pos = None
+        vel = None
+        if not self._get_pos_from_features:
+            # Retrieve pos from tensordict if position_key is set
+            if self.position_key is not None:
+                if self._full_position_key is None:
+                    self._full_position_key = self._get_key_terminating_with(
+                        list(tensordict.keys(True, True)), self.position_key
                     )
-            else:
-                pos = tensordict.get(self._full_position_key)
-            if not self.exclude_pos_from_node_features:
-                input.append(pos)
-        else:
-            pos = None
+                    pos_ = tensordict.get(self._full_position_key)
+                    if pos_.shape[-1] != self.pos_features - 1:
+                        raise ValueError(
+                            f"Position key in tensordict is {pos_.shape[-1]}-dim, "
+                            f"while model was configured with pos_features={self.pos_features - 1}"
+                        )
+                else:
+                    pos_ = tensordict.get(self._full_position_key)
 
-        # Retrieve velocity
-        if self.velocity_key is not None:
-            if self._full_velocity_key is None:  # Run once to find full key
-                self._full_velocity_key = self._get_key_terminating_with(
-                    list(tensordict.keys(True, True)), self.velocity_key
-                )
-                vel = tensordict.get(self._full_velocity_key)
-                if vel.shape[-1] != self.vel_features:
-                    raise ValueError(
-                        f"Velocity key in tensordict is {vel.shape[-1]}-dimensional, "
-                        f"while model was configured with vel_features={self.vel_features}"
+                if not self.exclude_pos_from_node_features:
+                    input_list.append(pos_)
+                pos = pos_
+
+            # Retrieve vel from tensordict if velocity_key is set
+            if self.velocity_key is not None:
+                if self._full_velocity_key is None:
+                    self._full_velocity_key = self._get_key_terminating_with(
+                        list(tensordict.keys(True, True)), self.velocity_key
                     )
-            else:
-                vel = tensordict.get(self._full_velocity_key)
-            input.append(vel)
-        else:
-            vel = None
+                    vel_ = tensordict.get(self._full_velocity_key)
+                    if vel_.shape[-1] != self.vel_features:
+                        raise ValueError(
+                            f"Velocity key in tensordict is {vel_.shape[-1]}-dim, "
+                            f"while model was configured with vel_features={self.vel_features}"
+                        )
+                else:
+                    vel_ = tensordict.get(self._full_velocity_key)
+
+                input_list.append(vel_)
+                vel = vel_
 
         input = torch.cat(input, dim=-1)
         batch_size = input.shape[:-2]
+
+        # If we are *extracting pos from features*:
+        if self._get_pos_from_features:
+            original_features = tensordict.get(self.group_key, "observation")['observation']
+            # e.g., we want the last 2 dims to be x,y position
+            if original_features.shape[-1] < 2:
+                raise ValueError(
+                    "Original Features does not have enough feature dims to slice out (x,y) position."
+                )
+            pos = original_features[..., 0, 0, -2:]
 
         graph = _batch_from_dense_to_ptg(
             x=input,
@@ -477,6 +495,7 @@ class GnnConfig(ModelConfig):
     vel_features: Optional[int] = 0
     exclude_pos_from_node_features: Optional[bool] = None
     edge_radius: Optional[float] = None
+    _get_pos_from_features: Optional[bool] = False
 
     @staticmethod
     def associated_class():
