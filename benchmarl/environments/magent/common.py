@@ -18,6 +18,7 @@ class MAgentTask(Task):
     """Enum for MAgent2 tasks."""
 
     ADVERSARIAL_PURSUIT = None
+    ADVERSARIAL_PURSUIT_TEAM = None
     # BATTLE = None
     # BATTLEFIELD = None
     # COMBINED_ARMS = None
@@ -46,6 +47,7 @@ class MAgentTask(Task):
         try:
             from magent2.environments import (
                 adversarial_pursuit_v4,
+                adversarial_pursuit_team_v1,
                 # battle_v4,
                 # battlefield_v5,
                 # combined_arms_v6,
@@ -59,6 +61,7 @@ class MAgentTask(Task):
 
         envs = {
             "ADVERSARIAL_PURSUIT": adversarial_pursuit_v4,
+            "ADVERSARIAL_PURSUIT_TEAM": adversarial_pursuit_team_v1,
             # "BATTLE": battle_v4,
             # "BATTLEFIELD": battlefield_v5,
             # "COMBINED_ARMS": combined_arms_v6,
